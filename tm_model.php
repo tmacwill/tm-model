@@ -1,8 +1,12 @@
 <?php 
 
 class TM_Model extends CI_Model {
+	// DB info
 	protected $name;
 	protected $table;
+
+	protected $has_one = array();
+	protected $has_many = array();
 
 	public function __construct() {
 		parent::__construct();
@@ -39,6 +43,26 @@ class TM_Model extends CI_Model {
 
 			return $this->get_by($query);
 		}
+	}
+
+	public function __get($v) {
+		// object has_one of given property, so fetch associated object
+		if (in_array(ucfirst($v), $this->has_one)) {
+			// instantiate associated model
+			$model_name = ucfirst($v);
+			$model = new $model_name;
+
+			// check if we have already fetched this property
+			if (isset($this->{$v}))
+				return $this->{$v};
+
+			// get value and save for future use
+			$value = $model->get($this->{"{$v}_id"});
+			$this->{$v} = $value;
+			return $value;
+		}
+
+		return parent::__get($v);
 	}
 
 	/**
@@ -87,7 +111,7 @@ class TM_Model extends CI_Model {
 	 * @return Object representing DB row
 	 *
 	 */
-	public function get($id) {
+	public function get($id, $fetch_related = true) {
 		// row doesn't take class name as an argument :(
 		$objects = $this->db->limit(1)->get_where($this->table, array('id' => $id))->result(get_class($this));
 		return (isset($objects[0])) ? $objects[0] : false;
@@ -103,7 +127,7 @@ class TM_Model extends CI_Model {
 	public function get_by($query, $key = 'id') {
 		// get rows from database
 		$type = get_class($this);
-		$objects = $this->db->get_where($this->table, $values)->result($type);
+		$objects = $this->db->get_where($this->table, $query)->result($type);
 
 		// convert unordered array to array keyed on given argument
 		$result = array();
