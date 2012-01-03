@@ -17,35 +17,10 @@ class TM_Model extends CI_Model {
 		$this->table = $this->name . 's';
 	}
 
-	public function __call($method, $args) {
-		// get_by_column function
-		if (preg_match('/^get_by_([\w_]+)/', $method, $matches)) {
-			// break up function name and remove get_by
-			$fields = explode('_', $matches[0]);
-			array_shift($fields);
-			array_shift($fields);
-
-			// set up query
-			$is_field = true;
-			$query = array();
-			$counter = 0;
-
-			// build query array from 
-			foreach ($fields as $field) {
-				// every other field will be a conjunction
-				if ($is_field) {
-					$query[$field] = $args[$counter];
-					$counter++;
-				}
-
-				// alternate fields and conjunctions
-				$is_field = !$is_field;
-			}
-
-			return $this->get_by($query);
-		}
-	}
-
+	/**
+	 * Lazy-load associations
+	 *
+	 */
 	public function __get($v) {
 		// check if property already exists
 		if (isset($this->{$v}))
@@ -59,7 +34,7 @@ class TM_Model extends CI_Model {
 
 		if ($has_one) {
 			// instantiate associated model
-			$model = new $has_on_model;
+			$model = new $has_one_model;
 
 			// get value and save for future use
 			$value = $model->get($this->{"{$v}_id"});
@@ -140,11 +115,23 @@ class TM_Model extends CI_Model {
 	 * @return Associative array keyed on $key
 	 *
 	 */
-	// TODO: BULK FETCH ASSOCIATIONS
-	public function get_by($query, $key = 'id') {
+	public function get_by($query, $fetch_associations = true, $key = 'id') {
+		// determine which query parameters are arrays
+		$where_ins = array();
+		foreach ($query as $field => $value) {
+			if (is_array($value)) {
+				// move field from = to IN
+				$where_ins[$field] = $value;
+				unset($query[$field]);
+			}
+		}
+
 		// get rows from database
 		$type = get_class($this);
-		$objects = $this->db->get_where($this->table, $query)->result($type);
+		$q = $this->db->where($query);
+		foreach ($where_ins as $k => $v)
+			$q->where_in($k, $v);
+		$objects = $q->get($this->table)->result($type);
 
 		// convert unordered array to array keyed on given argument
 		$result = array();
