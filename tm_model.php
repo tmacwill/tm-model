@@ -6,6 +6,7 @@ class TM_Model extends CI_Model {
 	protected $table;
 
 	// associations
+	protected $belongs_to = array();
 	protected $has_one = array();
 	protected $has_many = array();
 
@@ -58,6 +59,7 @@ class TM_Model extends CI_Model {
 
 	/**
 	 * Add a new object
+	 *
 	 * @param $data Either an object or associative array representing a single DB row
 	 * @return ID of inserted row
 	 *
@@ -71,6 +73,7 @@ class TM_Model extends CI_Model {
 
 	/**
 	 * Add a new set of objects
+	 *
 	 * @param $data Array of objects or associative arrays representing DB rows
 	 * @return False if unsuccessful
 	 *
@@ -81,6 +84,7 @@ class TM_Model extends CI_Model {
 
 	/**
 	 * Delete an object
+	 *
 	 * Can be called via $o->delete() or $this->Model->delete(1)
 	 * @param $id ID of object to delete
 	 * 
@@ -98,6 +102,7 @@ class TM_Model extends CI_Model {
 
 	/**
 	 * Get a single object
+	 *
 	 * @param $id ID of object to get
 	 * @return Object representing DB row
 	 *
@@ -110,12 +115,22 @@ class TM_Model extends CI_Model {
 
 	/**
 	 * Get a set of objects by a set of criteria
+	 *
 	 * @param $query Associative array mapping column names to values
+	 * @param $eager Associations to fetch eagerly
 	 * @param $key Field to use as the key in the returned associative array
 	 * @return Associative array keyed on $key
 	 *
 	 */
-	public function get_by($query, $fetch_associations = true, $key = 'id') {
+	public function get_by($query, $eager = array(), $group_key = 'id') {
+		// convert relationships to associative arrays for faster access
+		$has_one_assoc = array();
+		$has_many_assoc = array();
+		foreach ($this->has_one as $v)
+			$has_one_assoc[$v] = true;
+		foreach ($this->has_many as $v)
+			$has_many_assoc[$v] = true;
+
 		// determine which query parameters are arrays
 		$where_ins = array();
 		foreach ($query as $field => $value) {
@@ -133,23 +148,55 @@ class TM_Model extends CI_Model {
 			$q->where_in($k, $v);
 		$objects = $q->get($this->table)->result($type);
 
+		// bulk load associations
+		$object_ids = array_map(function ($e) { return $e->id; }, $objects);
+		$associations = array();
+		foreach ($eager as $association) {
+			// fetch objects associated with this object
+			$model = new $association;
+
+			// belongs_to relation
+			if (isset($has_one_assoc[$association])) {
+				$key = strtolower($association) . '_id';
+				$key_ids = array_map(function ($e) use ($key) { return $e->{$key}; }, $objects);
+				$associations[$association] = $model->get_by(array('id' => $key_ids));
+			}
+
+			// has_many relation
+			else if (isset($has_many_assoc[$association])) {
+				$key = strtolower(get_class($this)) . '_id';
+				$associations[$association] = $model->get_by(array($key => $object_ids), array(), $key);
+			}
+		}
+
+		// associate objects with fetched objects
+		foreach ($associations as $association => $associated_objects) {
+			// make association with each object
+			foreach ($objects as &$object) {
+				// determine key for object 
+				$object_key = strtolower($association) . ((isset($has_many_assoc[$association])) ? 's' : '');
+
+				// determine key for associated object
+				if (isset($has_one_assoc[$association]))
+					$association_key = strtolower($association) . '_id';
+				else if (isset($has_many_assoc[$association]))
+					$association_key = 'id';
+
+				// make association
+				$object->{$object_key} = isset($associated_objects[$object->{$association_key}]) ? 
+					$associated_objects[$object->{$association_key}] : null;
+			}
+		}
+
 		// convert unordered array to array keyed on given argument
 		$result = array();
-		foreach ($objects as $object) {
-			// determine key for result array
-			$k = $object->{$key};
+		foreach ($objects as &$object)
+			$result[$object->{$group_key}][] = $object;
 
-			// if value is already set, then convert to an array
-			if (isset($result[$k]))
-				$result[$k] = array($result[$k]);
-
-			// value is an array, so push to it
-			if (isset($result[$k]) && is_array($result[$k]))
-				$result[$k][] = $object;
-			// value is not an array, so set it
-			else
-				$result[$object->{$key}] = $object;
-		}
+		// flatten array values that only have one child
+		foreach ($result as $k => $v)
+			if (count($v) == 1)
+				$result[$k] = $result[$k][0];
 
 		return $result;
 	}
@@ -157,6 +204,8 @@ class TM_Model extends CI_Model {
 	/**
 	 * Save the current object to the database
 	 * Object will be added if no ID is given, else updated by ID
+	 * Can be called via $o->save() or $this->Model->save($o)
+	 *
 	 * @return False if unsuccessful
 	 *
 	 */
@@ -180,6 +229,7 @@ class TM_Model extends CI_Model {
 
 	/**
 	 * Update an existing DB row
+	 *
 	 * @param $id ID of row to update
 	 * @param $data New values for row
 	 * @return False if unsuccessful
