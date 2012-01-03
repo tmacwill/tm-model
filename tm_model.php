@@ -5,6 +5,7 @@ class TM_Model extends CI_Model {
 	protected $name;
 	protected $table;
 
+	// associations
 	protected $has_one = array();
 	protected $has_many = array();
 
@@ -46,18 +47,33 @@ class TM_Model extends CI_Model {
 	}
 
 	public function __get($v) {
-		// object has_one of given property, so fetch associated object
-		if (in_array(ucfirst($v), $this->has_one)) {
-			// instantiate associated model
-			$model_name = ucfirst($v);
-			$model = new $model_name;
+		// check if property already exists
+		if (isset($this->{$v}))
+			return parent::__get($this->{$v});
 
-			// check if we have already fetched this property
-			if (isset($this->{$v}))
-				return $this->{$v};
+		// check if property is an associated object
+		$has_one_model = ucfirst($v);
+		$has_many_model = ucfirst(substr($v, 0, strlen($v) - 1));
+		$has_one = in_array($has_one_model, $this->has_one);
+		$has_many = in_array($has_many_model, $this->has_many);
+
+		if ($has_one) {
+			// instantiate associated model
+			$model = new $has_on_model;
 
 			// get value and save for future use
 			$value = $model->get($this->{"{$v}_id"});
+			$this->{$v} = $value;
+			return $value;
+		}
+
+		if ($has_many) {
+			// instantiate associated model
+			$model = new $has_many_model;
+
+			// get value and save for future use
+			$key = strtolower(get_class($this)) . '_id';
+			$value = $model->get_by(array($key => $this->id));
 			$this->{$v} = $value;
 			return $value;
 		}
@@ -124,6 +140,7 @@ class TM_Model extends CI_Model {
 	 * @return Associative array keyed on $key
 	 *
 	 */
+	// TODO: BULK FETCH ASSOCIATIONS
 	public function get_by($query, $key = 'id') {
 		// get rows from database
 		$type = get_class($this);
