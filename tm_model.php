@@ -27,15 +27,19 @@ class TM_Model extends CI_Model {
 		if (isset($this->{$v}))
 			return parent::__get($this->{$v});
 
-		// check if property is an associated object
+		// construct model names from property
+		$belongs_to_model = ucfirst($v);
 		$has_one_model = ucfirst($v);
 		$has_many_model = ucfirst(substr($v, 0, strlen($v) - 1));
+
+		// check if property is an association
+		$belongs_to = in_array($belongs_to_model, $this->belongs_to);
 		$has_one = in_array($has_one_model, $this->has_one);
 		$has_many = in_array($has_many_model, $this->has_many);
 
-		if ($has_one) {
+		if ($belongs_to) {
 			// instantiate associated model
-			$model = new $has_one_model;
+			$model = new $belongs_to_model;
 
 			// get value and save for future use
 			$value = $model->get($this->{"{$v}_id"});
@@ -43,13 +47,18 @@ class TM_Model extends CI_Model {
 			return $value;
 		}
 
-		if ($has_many) {
+		else if ($has_many || $has_one) {
 			// instantiate associated model
-			$model = new $has_many_model;
+			$model = ($has_many) ? new $has_many_model : new $has_one_model;
 
 			// get value and save for future use
 			$key = strtolower(get_class($this)) . '_id';
 			$value = $model->get_by(array($key => $this->id));
+	
+			// convert array to scalar for has_one
+			if ($has_one && is_array($value) && !empty($value))
+				$value = array_shift($value);
+
 			$this->{$v} = $value;
 			return $value;
 		}
@@ -124,8 +133,12 @@ class TM_Model extends CI_Model {
 	 */
 	public function get_by($query, $eager = array(), $group_key = 'id') {
 		// convert relationships to associative arrays for faster access
+		$belongs_to_assoc = array();
 		$has_one_assoc = array();
 		$has_many_assoc = array();
+
+		foreach ($this->belongs_to as $v)
+			$belongs_to_assoc[$v] = true;
 		foreach ($this->has_one as $v)
 			$has_one_assoc[$v] = true;
 		foreach ($this->has_many as $v)
@@ -148,23 +161,23 @@ class TM_Model extends CI_Model {
 			$q->where_in($k, $v);
 		$objects = $q->get($this->table)->result($type);
 
-		// bulk load associations
-		$object_ids = array_map(function ($e) { return $e->id; }, $objects);
+		// load all objects associated with all returned objects
 		$associations = array();
 		foreach ($eager as $association) {
 			// fetch objects associated with this object
 			$model = new $association;
 
 			// belongs_to relation
-			if (isset($has_one_assoc[$association])) {
+			if (isset($belongs_to_assoc[$association])) {
 				$key = strtolower($association) . '_id';
 				$key_ids = array_map(function ($e) use ($key) { return $e->{$key}; }, $objects);
 				$associations[$association] = $model->get_by(array('id' => $key_ids));
 			}
 
 			// has_many relation
-			else if (isset($has_many_assoc[$association])) {
+			else if (isset($has_many_assoc[$association]) || isset($has_one_assoc[$association])) {
 				$key = strtolower(get_class($this)) . '_id';
+				$object_ids = array_map(function ($e) { return $e->id; }, $objects);
 				$associations[$association] = $model->get_by(array($key => $object_ids), array(), $key);
 			}
 		}
@@ -177,14 +190,18 @@ class TM_Model extends CI_Model {
 				$object_key = strtolower($association) . ((isset($has_many_assoc[$association])) ? 's' : '');
 
 				// determine key for associated object
-				if (isset($has_one_assoc[$association]))
+				if (isset($belongs_to_assoc[$association]))
 					$association_key = strtolower($association) . '_id';
-				else if (isset($has_many_assoc[$association]))
+				else if (isset($has_many_assoc[$association]) || isset($has_one_assoc[$association]))
 					$association_key = 'id';
 
 				// make association
 				$object->{$object_key} = isset($associated_objects[$object->{$association_key}]) ? 
 					$associated_objects[$object->{$association_key}] : null;
+
+				// convert array to scalar for has_one
+				if (isset($object->{$object_key}) && is_array($object->{$object_key}) && !empty($object->{$object_key}))
+					$object->{$object_key} = array_shift($object->{$object_key});
 			}
 		}
 
