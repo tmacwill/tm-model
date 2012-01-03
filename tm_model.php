@@ -110,6 +110,30 @@ class TM_Model extends CI_Model {
 	}
 
 	/**
+	 * Delete a set of objects by a set of criteria
+	 *
+	 * @param $query Associative array mapping column names to values
+	 *
+	 */
+	public function delete_by($query) {
+		// determine which query parameters are arrays
+		$where_ins = array();
+		foreach ($query as $field => $value) {
+			if (is_array($value)) {
+				// move field from = to IN
+				$where_ins[$field] = $value;
+				unset($query[$field]);
+			}
+		}
+
+		// delete rows from database
+		$q = $this->db->where($query);
+		foreach ($where_ins as $k => $v)
+			$q->where_in($k, $v);
+		$q->delete($this->table);
+	}
+
+	/**
 	 * Get a single object
 	 *
 	 * @param $id ID of object to get
@@ -120,6 +144,56 @@ class TM_Model extends CI_Model {
 		// row doesn't take class name as an argument :(
 		$objects = $this->db->limit(1)->get_where($this->table, array('id' => $id))->result(get_class($this));
 		return (isset($objects[0])) ? $objects[0] : false;
+	}
+
+	/**
+	 * Get the objects associated with this object
+	 *
+	 * @param $associations Optional list of associations to fetch. If not given, all are fetched
+	 *
+	 */
+	public function get_associated() {
+		// convert relationships to associative arrays for faster access
+		$belongs_to_assoc = array();
+		$has_one_assoc = array();
+		$has_many_assoc = array();
+
+		foreach ($this->belongs_to as $v)
+			$belongs_to_assoc[$v] = true;
+		foreach ($this->has_one as $v)
+			$has_one_assoc[$v] = true;
+		foreach ($this->has_many as $v)
+			$has_many_assoc[$v] = true;
+
+		$args = func_get_args();
+
+		// no argument, so get all associations
+		if (empty($args))
+			$fetch = array_merge($this->belongs_to, $this->has_one, $this->has_many);
+
+		// array argument, so use that list
+		else if (is_array($args[0]))
+			$fetch = $args[0];
+
+		// string argument, so construct array
+		else
+			$fetch = array($args[0]);
+
+		// load each association
+		foreach ($fetch as $association) {
+			if (isset($belongs_to_assoc[$association]) || isset($has_one_assoc[$association])) {
+				$key = strtolower($association);
+				$value = $this->{$key};
+			}
+
+			else if (isset($has_many_assoc[$association])) {
+				$key = strtolower($association) . 's';
+				$value = $this->{$key};
+			}
+		}
+
+		// allow method chaining
+		return $this;
 	}
 
 	/**
@@ -199,8 +273,13 @@ class TM_Model extends CI_Model {
 				$object->{$object_key} = isset($associated_objects[$object->{$association_key}]) ? 
 					$associated_objects[$object->{$association_key}] : null;
 
-				// convert array to scalar for has_one
-				if (isset($object->{$object_key}) && is_array($object->{$object_key}) && !empty($object->{$object_key}))
+				// make sure value is an array for has_many
+				if (isset($has_many_assoc[$association]) && !is_array($object->{$object_key}))
+					$object->{$object_key} = array($object->{$object_key});
+
+				// make sure value is an object for has_one
+				if (isset($has_one_asssoc[$association]) && isset($object->{$object_key}) && 
+						is_array($object->{$object_key}) && !empty($object->{$object_key}))
 					$object->{$object_key} = array_shift($object->{$object_key});
 			}
 		}
