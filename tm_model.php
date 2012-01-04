@@ -237,7 +237,10 @@ class TM_Model extends CI_Model {
 
 		// load all objects associated with all returned objects
 		$associations = array();
-		foreach ($eager as $association) {
+		foreach ($eager as $k => $v) {
+			// lack of key means this element is simply a single association
+			$association = ($k) ? $k : $v;
+
 			// fetch objects associated with this object
 			$model = new $association;
 
@@ -245,14 +248,20 @@ class TM_Model extends CI_Model {
 			if (isset($belongs_to_assoc[$association])) {
 				$key = strtolower($association) . '_id';
 				$key_ids = array_map(function ($e) use ($key) { return $e->{$key}; }, $objects);
-				$associations[$association] = $model->get_by(array('id' => $key_ids));
+
+				// fetch all associated objects recursively
+				$associations[$association] = $model->get_by(array('id' => $key_ids),
+					($k) ? $v : array());
 			}
 
 			// has_many relation
 			else if (isset($has_many_assoc[$association]) || isset($has_one_assoc[$association])) {
 				$key = strtolower(get_class($this)) . '_id';
 				$object_ids = array_map(function ($e) { return $e->id; }, $objects);
-				$associations[$association] = $model->get_by(array($key => $object_ids), array(), $key);
+
+				// fetch all associated objects recursively
+				$associations[$association] = $model->get_by(array($key => $object_ids), 
+					($k) ? $v : array(), $key);
 			}
 		}
 
@@ -275,7 +284,7 @@ class TM_Model extends CI_Model {
 
 				// make sure value is an array for has_many
 				if (isset($has_many_assoc[$association]) && !is_array($object->{$object_key}))
-					$object->{$object_key} = array($object->{$object_key});
+					$object->{$object_key} = ($object->{$object_key}) ? array($object->{$object_key}) : array();
 
 				// make sure value is an object for has_one
 				if (isset($has_one_asssoc[$association]) && isset($object->{$object_key}) && 
